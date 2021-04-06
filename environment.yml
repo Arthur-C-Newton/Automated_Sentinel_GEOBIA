@@ -4,9 +4,8 @@ channels:
   - defaults
 dependencies:
   - python=3.8.8
-  - geopandas=0.9.0
-  - cartopy=0.18.0
-  - notebook=6.2.0
-  - rasterio=1.2.0
   - rsgislib
+  - scikit-image
+  - rasterio
+  - geopandas
 prefix: C:\Users\arthu\anaconda3\envs\auto-class

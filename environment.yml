@@ -8,5 +8,4 @@ dependencies:
   - scikit-image
   - rasterio
   - geopandas
-  - pygeos
 prefix: C:\Users\arthu\anaconda3\envs\auto-class

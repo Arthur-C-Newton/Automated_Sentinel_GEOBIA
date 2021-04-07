@@ -10,7 +10,7 @@ import geopandas as gpd
 from shapely.geometry import Point
 
 stack_path = "tmp\\stack.tif"
-if not stack_path.exists():
+if not stack_path:  # this speeds up repeat executions for testing purposes
     # find zip file in input folder
     for file in os.listdir(".\\input"):
         if file.endswith(".zip"):

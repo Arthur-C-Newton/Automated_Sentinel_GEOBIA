@@ -5,10 +5,10 @@
 from zipfile import ZipFile
 import os
 import rasterio
-from rasterio.plot import reshape_as_image
 import geopandas as gpd
-from skimage import exposure
-from skimage.segmentation import slic
+import gdal
+from rsgislib.segmentation import segutils
+import rsgislib.rastergis
 
 stack_path = "tmp\\stack.tif"
 if not stack_path:  # this speeds up repeat executions for testing purposes
@@ -44,24 +44,23 @@ if not stack_path:  # this speeds up repeat executions for testing purposes
                 print("Writing band...")
     print("Multi-band GeoTiff saved successfully at tmp/stack.tif!")
 
-with rasterio.open(stack_path) as data:
-    raster = data.read()
-# reshape the raster into a format understood by skimage
-image = reshape_as_image(raster)
-image.shape
+# re-import data and save as KEA
+raster = gdal.Open(stack_path)
+raster = gdal.Translate("tmp\\raster.kea", raster, format="KEA")
 
-# rescale the values to 0-1 range
-img = exposure.rescale_intensity(image)
+in_img = "tmp\\raster.kea"
+clumps = "clumps_image.kea"
+tmp_path = ".\\tmp"
 
-# segment the image using SLIC algorithm
-print("Segmenting image...")
-segments = slic(img, n_segments=500000, compactness=0.1)
-print("Segmentation complete!")
+# segment the image using rsgislib
+segutils.runShepherdSegmentation(in_img, clumps, tmpath=tmp_path, numClusters=100, minPxls=100, distThres=100, sampling=100, kmMaxIter=200)
+band_info = []
+band_info.append(rsgislib.rastergis.BandAttStats(band=1, minField='BlueMin', maxField='BlueMax', meanField='BlueMean', stdDevField='BlueStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=2, minField='GreenMin', maxField='GreenMax', meanField='GreenMean', stdDevField='GreenStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=3, minField='RedMin', maxField='RedMax', meanField='RedMean', stdDevField='RedStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=4, minField='NIRMin', maxField='NIRMax', meanField='NIRMean', stdDevField='NIRStdev'))
+rsgislib.rastergis.populateRATWithStats(in_img, clumps, band_info)
 
-segment_path = "tmp\\segments.tif"
-meta2 = band2.meta
-with rasterio.open(segment_path, 'w', **meta2) as seg:
-    seg.write(segments)
 
 # import training data
 # find shapefiles in the input folder

@@ -5,9 +5,10 @@
 from zipfile import ZipFile
 import os
 import rasterio
-import pandas as pd
+from rasterio.plot import reshape_as_image
 import geopandas as gpd
-from shapely.geometry import Point
+from skimage import exposure
+from skimage.segmentation import slic
 
 stack_path = "tmp\\stack.tif"
 if not stack_path:  # this speeds up repeat executions for testing purposes
@@ -42,6 +43,25 @@ if not stack_path:  # this speeds up repeat executions for testing purposes
                 dst.write_band(id, src1.read(1))
                 print("Writing band...")
     print("Multi-band GeoTiff saved successfully at tmp/stack.tif!")
+
+with rasterio.open(stack_path) as data:
+    raster = data.read()
+# reshape the raster into a format understood by skimage
+image = reshape_as_image(raster)
+image.shape
+
+# rescale the values to 0-1 range
+img = exposure.rescale_intensity(image)
+
+# segment the image using SLIC algorithm
+print("Segmenting image...")
+segments = slic(img, n_segments=500000, compactness=0.1)
+print("Segmentation complete!")
+
+segment_path = "tmp\\segments.tif"
+meta2 = band2.meta
+with rasterio.open(segment_path, 'w', **meta2) as seg:
+    seg.write(segments)
 
 # import training data
 # find shapefiles in the input folder

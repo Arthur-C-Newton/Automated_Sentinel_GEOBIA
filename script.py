@@ -7,22 +7,29 @@ import os
 from pathlib import Path
 import rasterio
 from rasterio import mask
-from rasterio.windows import get_data_window
 import geopandas as gpd
 import gdal
 from rsgislib.segmentation import segutils
 import rsgislib.rastergis
 import rsgislib.rastergis.ratutils
+import rsgislib.classification.classratutils
+from sklearn.model_selection import GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from numpy import random
+import csv
 
 # file paths and other elements that should be set by user
 extent_path = "input\\extent.shp"  # replace these paths later to allow users to set this when running script
+shp_path = "input\\training_data.shp"
+out_path = "output\\"
 tmp_path = ".\\tmp"
 stack_path = "tmp\\stack.tif"  # users should only want to change this if they want to only save the stacked image
-shp_path = "input\\training_data.shp"
+
 
 for file in os.listdir(".\\input"):
     if file.endswith(".zip"):
         zip_path = os.path.join(".\\input", file)
+        filename = Path(zip_path).stem
 
 class_col_name = 'Ecological'  # this is the name of the column of the training data that contains class strings
 
@@ -88,7 +95,6 @@ band_info.append(rsgislib.rastergis.BandAttStats(band=3, minField='RedMin', maxF
 band_info.append(rsgislib.rastergis.BandAttStats(band=4, minField='NIRMin', maxField='NIRMax', meanField='NIRMean', stdDevField='NIRStdev'))
 rsgislib.rastergis.populateRATWithStats(in_img, clumps, band_info)
 
-
 # import training data from shapefile
 training_data = gpd.read_file(shp_path)
 print(training_data.head())  # for testing
@@ -97,9 +103,11 @@ print(training_data.head())  # for testing
 for l_class, training_class in training_data.groupby(class_col_name):
     training_class.to_file(tmp_path + "\\" + l_class + ".shp")
 
-# read shapefiles of each class into dictionary
+# read shapefiles of each class into dictionary and assign colour values to them for classification
 class_dict = dict()
 index = 0
+class_colours = dict()
+colour = [0, 0, 0]
 for file in os.listdir(tmp_path):
     if file.endswith(".shp"):
         class_path = os.path.join(tmp_path, file)
@@ -107,7 +115,40 @@ for file in os.listdir(tmp_path):
         class_name_nospace = class_filename.replace(" ", "_")
         index += 1
         class_dict[class_name_nospace] = [index, class_path]
+        random.seed(index)
+        colour = random.randint(255, size=3)
+        class_colours[class_name_nospace] = colour
 
+
+# populate segments with training data
 class_int_col_in = "ClassInt"
 class_name_col = "ClassStr"
 rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in, class_name_col)
+
+# balance the number of samples for each class
+# classes_int_col = "ClassIntSamp"
+# rsgislib.classification.classratutils.balanceSampleTrainingRandom(clumps, class_int_col_in, classes_int_col, 100, 200)
+
+# find the optimal parameters for the classifier
+variables = ['BlueMean', 'GreenMean', 'RedMean', 'NIRMean']
+grid_search = GridSearchCV(RandomForestClassifier(), param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]})
+classifier = rsgislib.classification.classratutils.findClassifierParameters(clumps, class_int_col_in, variables, gridSearch=grid_search)
+
+# train the classifier using tiles
+out_class_int_col = 'OutClass'
+out_class_str_col = 'OUtClassName'
+rsgislib.classification.classratutils.classifyWithinRATTiled(clumps, class_int_col_in, class_name_col, variables, classifier=classifier, outColInt=out_class_int_col, outColStr=out_class_str_col, classColours=class_colours)
+
+# collapse classified RAT to .kea raster file
+out_class_img = out_path + filename + "_classified.kea"
+rsgislib.classification.collapseClasses(clumps, out_class_img, "KEA", out_class_str_col, out_class_int_col)
+
+# also export to a GeoTiff so it can be read by other software more easily
+datatype = rsgislib.TYPE_8INT
+out_class_img2 = out_path + filename + "_classified.tif"
+rsgislib.rastergis.exportCol2GDALImage(clumps, out_class_img2, "GTiff", datatype, out_class_int_col)
+
+# save the colour values and the classes they represent to a csv file
+with open(out_path + "classes.csv", 'w') as f:
+    w = csv.writer(f)
+    w.writerows(class_colours.items())

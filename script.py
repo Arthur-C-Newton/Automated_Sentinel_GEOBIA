@@ -17,21 +17,57 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from numpy import random
 import csv
+import argparse
 
-# file paths and other elements that should be set by user
-extent_path = "input\\extent.shp"  # replace these paths later to allow users to set this when running script
-shp_path = "input\\training_data.shp"
-out_path = "output\\"
-tmp_path = ".\\tmp"
-stack_path = "tmp\\stack.tif"  # users should only want to change this if they want to only save the stacked image
+# define command line parser arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("-i", "--input_path", help="path to input folder", default=".\\input")
+parser.add_argument("-o", "--output_path", help="path to final output folder", default=".\\output")
+parser.add_argument("-t", "--tmp_path", help="path to temp folder", default=".\\tmp")
+parser.add_argument("-zp", "--zip_path", help="file path to zip file containing image bands", default="None")
+parser.add_argument("-ex", "--extent", help="file path to shapefile extent", default="None")
+parser.add_argument("-tr", "--training_data", help="file path to training data shapefile", default="None")
+parser.add_argument("-st", "--stack_out", help="file output path for stacked multiband tif", default="None")
+parser.add_argument("-cl", "--class_col", help="column in training data containing class names", default="Ecological")
+args = parser.parse_args()
 
 
-for file in os.listdir(".\\input"):
-    if file.endswith(".zip"):
-        zip_path = os.path.join(".\\input", file)
-        filename = Path(zip_path).stem
+def fix_paths(arg, folder="None", name="None"):
+    """
+    Assigns file path from parser argument to a variable, including cases where two arguments are required.
 
-class_col_name = 'Ecological'  # this is the name of the column of the training data that contains class strings
+        Parameters:
+            arg (str): Parser argument to be assigned
+            folder (str): Parser argument for the containing folder (if required)
+            name (str): Name of the file (if required)
+
+        Returns:
+            var (str): Variable containing file path
+    """
+    if arg == "None":
+        var = folder + "\\" + name
+    else:
+        var = arg
+    return var
+
+
+# assign file paths from parser arguments to variables
+extent_path = fix_paths(args.extent, args.input_path, "extent.shp")
+shp_path = fix_paths(args.training_data, args.input_path, "training_data.shp")
+in_path = fix_paths(args.input_path)
+out_path = fix_paths(args.output_path)
+tmp_path = fix_paths(args.tmp_path)
+stack_path = fix_paths(args.stack_out, args.tmp_path, "stack.tif")
+
+# extract path to zip file in input folder if full path to image zip file not provided
+if args.zip_path == "None":
+    for file in os.listdir(in_path):
+        if file.endswith(".zip"):
+            zip_path = os.path.join(in_path, file)
+else:
+    zip_path = args.zip_path
+
+
 
 # create ist of files that are band images
 archive = ZipFile(zip_path, 'r')
@@ -85,19 +121,26 @@ raster = gdal.Translate("tmp\\raster.kea", raster, format="KEA")
 in_img = "tmp\\raster.kea"
 clumps = "clumps_image.kea"
 
-
 # segment the image using rsgislib
-segutils.runShepherdSegmentation(in_img, clumps, tmpath=tmp_path, numClusters=100, minPxls=100, distThres=100, sampling=100, kmMaxIter=200)
+segutils.runShepherdSegmentation(in_img, clumps, tmpath=tmp_path, numClusters=100, minPxls=100, distThres=100,
+                                 sampling=100, kmMaxIter=200)
 band_info = []
-band_info.append(rsgislib.rastergis.BandAttStats(band=1, minField='BlueMin', maxField='BlueMax', meanField='BlueMean', stdDevField='BlueStdev'))
-band_info.append(rsgislib.rastergis.BandAttStats(band=2, minField='GreenMin', maxField='GreenMax', meanField='GreenMean', stdDevField='GreenStdev'))
-band_info.append(rsgislib.rastergis.BandAttStats(band=3, minField='RedMin', maxField='RedMax', meanField='RedMean', stdDevField='RedStdev'))
-band_info.append(rsgislib.rastergis.BandAttStats(band=4, minField='NIRMin', maxField='NIRMax', meanField='NIRMean', stdDevField='NIRStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=1, minField='BlueMin', maxField='BlueMax', meanField='BlueMean',
+                                                 stdDevField='BlueStdev'))
+band_info.append(
+    rsgislib.rastergis.BandAttStats(band=2, minField='GreenMin', maxField='GreenMax', meanField='GreenMean',
+                                    stdDevField='GreenStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=3, minField='RedMin', maxField='RedMax', meanField='RedMean',
+                                                 stdDevField='RedStdev'))
+band_info.append(rsgislib.rastergis.BandAttStats(band=4, minField='NIRMin', maxField='NIRMax', meanField='NIRMean',
+                                                 stdDevField='NIRStdev'))
 rsgislib.rastergis.populateRATWithStats(in_img, clumps, band_info)
 
 # import training data from shapefile
 training_data = gpd.read_file(shp_path)
 print(training_data.head())  # for testing
+
+class_col_name = args.class_col  # assigns the class name column to a variable
 
 # save each land cover class as a separate shapefile
 for l_class, training_class in training_data.groupby(class_col_name):
@@ -119,11 +162,11 @@ for file in os.listdir(tmp_path):
         colour = random.randint(255, size=3)
         class_colours[class_name_nospace] = colour
 
-
 # populate segments with training data
 class_int_col_in = "ClassInt"
 class_name_col = "ClassStr"
-rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in, class_name_col)
+rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in,
+                                                            class_name_col)
 
 # balance the number of samples for each class
 # classes_int_col = "ClassIntSamp"
@@ -131,24 +174,29 @@ rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, 
 
 # find the optimal parameters for the classifier
 variables = ['BlueMean', 'GreenMean', 'RedMean', 'NIRMean']
-grid_search = GridSearchCV(RandomForestClassifier(), param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]})
-classifier = rsgislib.classification.classratutils.findClassifierParameters(clumps, class_int_col_in, variables, gridSearch=grid_search)
+grid_search = GridSearchCV(RandomForestClassifier(),
+                           param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]})
+classifier = rsgislib.classification.classratutils.findClassifierParameters(clumps, class_int_col_in, variables,
+                                                                            gridSearch=grid_search)
 
 # train the classifier using tiles
 out_class_int_col = 'OutClass'
 out_class_str_col = 'OUtClassName'
-rsgislib.classification.classratutils.classifyWithinRATTiled(clumps, class_int_col_in, class_name_col, variables, classifier=classifier, outColInt=out_class_int_col, outColStr=out_class_str_col, classColours=class_colours)
+rsgislib.classification.classratutils.classifyWithinRATTiled(clumps, class_int_col_in, class_name_col, variables,
+                                                             classifier=classifier, outColInt=out_class_int_col,
+                                                             outColStr=out_class_str_col, classColours=class_colours)
 
 # collapse classified RAT to .kea raster file
-out_class_img = out_path + filename + "_classified.kea"
+filename = Path(zip_path).stem
+out_class_img = out_path + "\\" + filename + "_classified.kea"
 rsgislib.classification.collapseClasses(clumps, out_class_img, "KEA", out_class_str_col, out_class_int_col)
 
 # also export to a GeoTiff so it can be read by other software more easily
 datatype = rsgislib.TYPE_8INT
-out_class_img2 = out_path + filename + "_classified.tif"
+out_class_img2 = out_path + "\\" + filename + "_classified.tif"
 rsgislib.rastergis.exportCol2GDALImage(clumps, out_class_img2, "GTiff", datatype, out_class_int_col)
 
 # save the colour values and the classes they represent to a csv file
-with open(out_path + "classes.csv", 'w') as f:
+with open(out_path + "\\classes.csv", 'w') as f:
     w = csv.writer(f)
     w.writerows(class_colours.items())

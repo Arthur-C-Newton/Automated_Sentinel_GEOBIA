@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import rasterio
 from rasterio import mask
+from rasterio import features
+import pandas as pd
 import geopandas as gpd
 import gdal
 from rsgislib.segmentation import segutils
@@ -61,7 +63,7 @@ def band_index(band, file_list):
     :param file_list: List of Sentinel single-band image files
     :return idx_name: Index of band image in file list
     """
-    if band <10:
+    if band < 10:
         band_suffix = "_B" + "0" + str(band)
     else:
         band_suffix = "_B" + str(band)
@@ -149,22 +151,25 @@ def segment(multiband):
 
 
 def training_prep(split):
-    """Preprocess training data"""
+    """Preprocess training data with optional 70/30 train/test split"""
 
     # import training data from shapefile
     training_data = gpd.read_file(shp_path)
-    class_col_name = args.class_col  # assign the class name column to a variable
 
     # save each land cover class as a separate shapefile
     if split:
         for l_class, training_class in training_data.groupby(class_col_name):
             shp_train = training_class.sample(frac=0.7)
-            shp_test = training_class.drop(shp_train.index())
+            shp_test = training_class.drop(shp_train.index)
             shp_train.to_file(tmp_path + "\\" + l_class + "_train" + ".shp")
             shp_test.to_file(tmp_path + "\\" + l_class + "_test" + ".shp")
     else:
         for l_class, training_class in training_data.groupby(class_col_name):
             training_class.to_file(tmp_path + "\\" + l_class + ".shp")
+
+
+def classify(validate):
+    """Trains and applies a random forest classifier to the segmented raster then outputs to a file"""
 
     # read shapefiles of each class into dictionary and assign colour values to them for classification
     class_dict = dict()
@@ -182,6 +187,56 @@ def training_prep(split):
             colour = random.randint(255, size=3)
             class_colours[class_name_nospace] = colour
 
+    # populate segments with training data
+    class_int_col_in = "ClassInt"
+    class_name_col = "ClassStr"
+    rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in,
+                                                                class_name_col)
+
+    # find the optimal parameters for the classifier
+    variables = ['BlueMean', 'GreenMean', 'RedMean', 'NIRMean']
+    grid_search = GridSearchCV(
+        RandomForestClassifier(),
+        param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]}
+    )
+    classifier = rsgislib.classification.classratutils.findClassifierParameters(clumps, class_int_col_in, variables,
+                                                                                gridSearch=grid_search)
+
+    # apply the classifier to the image
+    out_class_int_col = 'OutClass'
+    out_class_str_col = 'OUtClassName'
+    rsgislib.classification.classratutils.classifyWithinRATTiled(clumps, class_int_col_in, class_name_col, variables,
+                                                                 classifier=classifier, outColInt=out_class_int_col,
+                                                                 outColStr=out_class_str_col,
+                                                                 classColours=class_colours)
+
+    # export classified image to a GeoTiff
+    filename = Path(zip_path).stem
+    datatype = rsgislib.TYPE_8INT
+    out_class_img = out_path + "\\" + filename + "_classified.tif"
+    rsgislib.rastergis.exportCol2GDALImage(clumps, out_class_img, "GTiff", datatype, out_class_int_col)
+
+    # save the image values and the classes they represent to a csv file
+    # values are retrieved from the class dictionary (includes classes not present in final image)
+    class_values = {}
+    for i, key in enumerate(class_dict):
+        class_values[key] = list(class_dict.keys()).index(key) + 1
+    with open(out_path + "\\classes.csv", 'w') as f:
+        w = csv.writer(f)
+        w.writerows(class_values.items())
+
+    if validate:
+        test_file_list = [tmp_path + "\\" + name for name in os.listdir(tmp_path) if
+                          name.endswith('.shp') and '_test' in name]
+        test_gdf = pd.concat([gpd.read_file(f) for f in test_file_list])
+        with rasterio.open(stack_path, 'r') as stack:
+            profile = stack.meta
+            profile.update(count=1)
+            with rasterio.open(tmp_path + "\\" + "tst_raster.tif", 'w', **profile) as dst:
+                points = ((geom,value) for geom, value in zip(test_gdf.geometry, test_gdf[[class_col_name]]))
+                burned = features.rasterize(shapes=points, fill=0, out=dst, transform=dst.transform)
+                dst.write_band(1, burned)  # from https://gis.stackexchange.com/a/151861
+# to fix this part, make an extra column in the dataframe that joins the values to the correct class name
 
 # assign file paths from parser arguments to variables
 extent_path = fix_paths(args.extent, args.input_path, "extent.shp")
@@ -190,6 +245,7 @@ in_path = fix_paths(args.input_path)
 out_path = fix_paths(args.output_path)
 tmp_path = fix_paths(args.tmp_path)
 stack_path = fix_paths(args.stack_out, args.tmp_path, "stack.tif")
+class_col_name = args.class_col  # assign the class name column to a variable
 
 # retrieve path to zip file in input folder if full path to image zip file not provided
 if args.zip_path == "None":
@@ -200,42 +256,6 @@ else:
     zip_path = args.zip_path
 
 stack()
-segment(stack_path)
+clumps = segment(stack_path)
 training_prep(args.validate)
-
-
-
-# populate segments with training data
-class_int_col_in = "ClassInt"
-class_name_col = "ClassStr"
-rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in,
-                                                            class_name_col)
-
-# find the optimal parameters for the classifier
-variables = ['BlueMean', 'GreenMean', 'RedMean', 'NIRMean']
-grid_search = GridSearchCV(RandomForestClassifier(),
-                           param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]})
-classifier = rsgislib.classification.classratutils.findClassifierParameters(clumps, class_int_col_in, variables,
-                                                                            gridSearch=grid_search)
-
-# apply the classifier to the image
-out_class_int_col = 'OutClass'
-out_class_str_col = 'OUtClassName'
-rsgislib.classification.classratutils.classifyWithinRATTiled(clumps, class_int_col_in, class_name_col, variables,
-                                                             classifier=classifier, outColInt=out_class_int_col,
-                                                             outColStr=out_class_str_col, classColours=class_colours)
-
-# export classified image to a GeoTiff
-filename = Path(zip_path).stem
-datatype = rsgislib.TYPE_8INT
-out_class_img = out_path + "\\" + filename + "_classified.tif"
-rsgislib.rastergis.exportCol2GDALImage(clumps, out_class_img, "GTiff", datatype, out_class_int_col)
-
-# save the image values and the classes they represent to a csv file
-# values are retrieved from the class dictionary (includes classes not present in final image)
-class_values = {}
-for i, key in enumerate(class_dict):
-    class_values[key] = list(class_dict.keys()).index(key) + 1
-with open(out_path + "\\classes.csv", 'w') as f:
-    w = csv.writer(f)
-    w.writerows(class_values.items())
+classify(args.validate)

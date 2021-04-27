@@ -254,7 +254,7 @@ def classify(validate, band_names):
                 accuracy = matrix.diagonal() / matrix.sum(axis=0)
                 print("Confusion matrix:")
                 print(np.around(matrix, decimals=2))
-                print("Overall accuracy: {}".format(np.around(accuracy, decimals=2)))
+                print("Overall accuracy per class: {}".format(np.around(accuracy, decimals=2)))
                 np.savetxt(out_path + "\\confusion_matrix.csv", matrix, delimiter=",")
 
 

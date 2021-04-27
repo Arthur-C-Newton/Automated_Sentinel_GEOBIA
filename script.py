@@ -1,8 +1,4 @@
-# This is the main script
-# the docstring should go here
-
-# import the required modules
-from typing import Tuple
+# import required modules
 from zipfile import ZipFile
 import os
 from pathlib import Path
@@ -23,6 +19,7 @@ import numpy as np
 from numpy import random
 import csv
 import argparse
+import shutil
 
 
 def fix_paths(arg, folder="None", name="None"):
@@ -297,3 +294,8 @@ bandNames = ['Blue', 'Green', 'Red', 'NIR']
 clumps = segment(stack_path, bandIds, bandNames)
 training_prep(args.validate)
 classify(args.validate, bandNames)
+print("Script finished successfully")
+
+# erase temp directory and remake it
+shutil.rmtree(tmp_path)
+os.makedirs(tmp_path)

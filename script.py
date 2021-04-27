@@ -22,6 +22,17 @@ import argparse
 import shutil
 
 
+def create_dirs(path):
+    """
+    Ensure a directory exists for the specified path
+
+    :param path: Path to directory
+    """
+
+    if not os.path.isdir(path):
+        os.makedirs(path)
+
+
 def fix_paths(arg, folder="None", name="None"):
     """
     Assigns file path from parser argument to a variable, including cases where two arguments are required.
@@ -278,6 +289,10 @@ out_path = fix_paths(args.output_path)
 tmp_path = fix_paths(args.tmp_path)
 stack_path = fix_paths(args.stack_out, args.tmp_path, "stack.tif")
 class_col_name = args.class_col  # assign the class name column to a variable
+
+# make sure the output and temp folders exist
+create_dirs(out_path)
+create_dirs(tmp_path)
 
 # retrieve path to zip file in input folder if full path to image zip file not provided
 if args.zip_path == "None":

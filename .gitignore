@@ -4,9 +4,4 @@
 *.tif
 *.xml
 *.kea
-*.cpg
-*.dbf
-*.prj
-*.shp
-*.shx
 *.csv

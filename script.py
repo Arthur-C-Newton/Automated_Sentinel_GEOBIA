@@ -18,22 +18,11 @@ import rsgislib.rastergis.ratutils
 import rsgislib.classification.classratutils
 from sklearn.model_selection import GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
+from sklearn import metrics
+import numpy as np
 from numpy import random
 import csv
 import argparse
-
-# define command line parser arguments
-parser = argparse.ArgumentParser()
-parser.add_argument("-i", "--input_path", help="path to input folder", default=".\\input")
-parser.add_argument("-o", "--output_path", help="path to final output folder", default=".\\output")
-parser.add_argument("-t", "--tmp_path", help="path to temp folder", default=".\\tmp")
-parser.add_argument("-zp", "--zip_path", help="file path to zip file containing image bands", default="None")
-parser.add_argument("-ex", "--extent", help="file path to shapefile extent", default="None")
-parser.add_argument("-tr", "--training_data", help="file path to training data shapefile", default="None")
-parser.add_argument("-st", "--stack_out", help="file output path for stacked multiband tif", default="None")
-parser.add_argument("-cl", "--class_col", help="column in training data containing class names", default="Ecological")
-parser.add_argument("-v", "--validate", help="split training data and perform validation", action="store_true")
-args = parser.parse_args()
 
 
 def fix_paths(arg, folder="None", name="None"):
@@ -114,7 +103,19 @@ def stack():
     print("Multi-band GeoTiff saved successfully at " + stack_path)
 
 
-def segment(multiband):
+def get_band_mean(bandId, bandName):
+    """
+    Creates the keyword arguments required for rsgislib.rastergis.BandAttStats (mean only)
+
+    :param bandId: Band number of input multi-band raster
+    :param bandName: Name of raster band (e.g. 'Blue')
+    :return kwargs: Set of arguments for rsgislib.rastergis.BandAttStats
+    """
+    kwargs = {'band': bandId, 'meanField': bandName + 'Mean'}
+    return kwargs
+
+
+def segment(multiband, bands, band_names):
     """
     Run segmentation on multi-band raster
 
@@ -133,19 +134,11 @@ def segment(multiband):
     # segment the image using rsgislib
     segutils.runShepherdSegmentation(in_img, clumps, tmpath=tmp_path, numClusters=100, minPxls=100, distThres=100,
                                      sampling=100, kmMaxIter=200)
+
     band_info = []
-    band_info.append(rsgislib.rastergis.BandAttStats(
-        band=1, minField='BlueMin', maxField='BlueMax',
-        meanField='BlueMean', stdDevField='BlueStdev'))
-    band_info.append(rsgislib.rastergis.BandAttStats(
-        band=2, minField='GreenMin', maxField='GreenMax',
-        meanField='GreenMean', stdDevField='GreenStdev'))
-    band_info.append(rsgislib.rastergis.BandAttStats(
-        band=3, minField='RedMin', maxField='RedMax',
-        meanField='RedMean', stdDevField='RedStdev'))
-    band_info.append(rsgislib.rastergis.BandAttStats(
-        band=4, minField='NIRMin', maxField='NIRMax',
-        meanField='NIRMean', stdDevField='NIRStdev'))
+    for band, name in zip(bands, band_names):
+        band_args = get_band_mean(band, name)
+        band_info.append(rsgislib.rastergis.BandAttStats(**band_args))
     rsgislib.rastergis.populateRATWithStats(in_img, clumps, band_info)
     return clumps
 
@@ -161,14 +154,14 @@ def training_prep(split):
         for l_class, training_class in training_data.groupby(class_col_name):
             shp_train = training_class.sample(frac=0.7)
             shp_test = training_class.drop(shp_train.index)
-            shp_train.to_file(tmp_path + "\\" + l_class + "_train" + ".shp")
+            shp_train.to_file(tmp_path + "\\" + l_class + ".shp")
             shp_test.to_file(tmp_path + "\\" + l_class + "_test" + ".shp")
     else:
         for l_class, training_class in training_data.groupby(class_col_name):
             training_class.to_file(tmp_path + "\\" + l_class + ".shp")
 
 
-def classify(validate):
+def classify(validate, band_names):
     """Trains and applies a random forest classifier to the segmented raster then outputs to a file"""
 
     # read shapefiles of each class into dictionary and assign colour values to them for classification
@@ -193,8 +186,13 @@ def classify(validate):
     rsgislib.rastergis.ratutils.populateClumpsWithClassTraining(clumps, class_dict, tmp_path, class_int_col_in,
                                                                 class_name_col)
 
+    # get the field name used to populate the clumps
+    variables = []
+    for i, name in enumerate(band_names):
+        n = get_band_mean(i, name)['meanField']
+        variables.append(n)
+
     # find the optimal parameters for the classifier
-    variables = ['BlueMean', 'GreenMean', 'RedMean', 'NIRMean']
     grid_search = GridSearchCV(
         RandomForestClassifier(),
         param_grid={'n_estimators': [10, 20, 50, 100], 'max_depth': [2, 4, 8]}
@@ -226,17 +224,54 @@ def classify(validate):
         w.writerows(class_values.items())
 
     if validate:
-        test_file_list = [tmp_path + "\\" + name for name in os.listdir(tmp_path) if
-                          name.endswith('.shp') and '_test' in name]
+        # merge the test data into a single dataframe
+        test_file_list = [tmp_path + "\\" + name for name in os.listdir(tmp_path)
+                          if name.endswith('.shp') and '_test' in name]
         test_gdf = pd.concat([gpd.read_file(f) for f in test_file_list])
+
+        # merge the class values to the appropriate class
+        class_values_space = {k.replace('_', ' '): v for k, v in
+                              class_values.items()}  # from https://stackoverflow.com/a/20563278
+        class_values_df = pd.DataFrame.from_dict(class_values_space, orient='index', columns=['class_value'])
+        test_merge = pd.merge(test_gdf, class_values_df, left_on=class_col_name, right_index=True)
+
+        # convert merged test data to raster for comparison to predicted raster
         with rasterio.open(stack_path, 'r') as stack:
             profile = stack.meta
-            profile.update(count=1)
+            profile.update(count=1, dtype='uint8')
             with rasterio.open(tmp_path + "\\" + "tst_raster.tif", 'w', **profile) as dst:
-                points = ((geom,value) for geom, value in zip(test_gdf.geometry, test_gdf[[class_col_name]]))
-                burned = features.rasterize(shapes=points, fill=0, out=dst, transform=dst.transform)
+                points = ((geom, value) for geom, value in zip(test_merge.geometry, test_merge.class_value))
+                burned = features.rasterize(shapes=points, fill=0, out_shape=dst.shape, transform=dst.transform)
                 dst.write_band(1, burned)  # from https://gis.stackexchange.com/a/151861
-# to fix this part, make an extra column in the dataframe that joins the values to the correct class name
+
+        # report and save the confusion matrix for accuracy assessment
+        with rasterio.open(tmp_path + "\\" + "tst_raster.tif", 'r') as tst:
+            with rasterio.open(out_class_img, 'r') as pred:
+                truth = tst.read(1)
+                predicted = pred.read(1)
+                idx = np.nonzero(truth)
+                matrix = metrics.confusion_matrix(truth[idx], predicted[idx], normalize='true')
+                accuracy = matrix.diagonal() / matrix.sum(axis=0)
+                print("Confusion matrix:")
+                print(np.around(matrix, decimals=2))
+                print("Overall accuracy: {}".format(np.around(accuracy, decimals=2)))
+                np.savetxt(out_path + "\\confusion_matrix.csv", matrix, delimiter=",")
+
+
+# the section below is where the script is actually run
+
+# define command line parser arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("-i", "--input_path", help="path to input folder", default=".\\input")
+parser.add_argument("-o", "--output_path", help="path to final output folder", default=".\\output")
+parser.add_argument("-t", "--tmp_path", help="path to temp folder", default=".\\tmp")
+parser.add_argument("-zp", "--zip_path", help="file path to zip file containing image bands", default="None")
+parser.add_argument("-ex", "--extent", help="file path to shapefile extent", default="None")
+parser.add_argument("-tr", "--training_data", help="file path to training data shapefile", default="None")
+parser.add_argument("-st", "--stack_out", help="file output path for stacked multiband tif", default="None")
+parser.add_argument("-cl", "--class_col", help="column in training data containing class names", default="Ecological")
+parser.add_argument("-v", "--validate", help="split training data and perform validation", action="store_true")
+args = parser.parse_args()
 
 # assign file paths from parser arguments to variables
 extent_path = fix_paths(args.extent, args.input_path, "extent.shp")
@@ -255,7 +290,10 @@ if args.zip_path == "None":
 else:
     zip_path = args.zip_path
 
+# call functions to run operation
 stack()
-clumps = segment(stack_path)
+bandIds = [1, 2, 3, 4]
+bandNames = ['Blue', 'Green', 'Red', 'NIR']
+clumps = segment(stack_path, bandIds, bandNames)
 training_prep(args.validate)
-classify(args.validate)
+classify(args.validate, bandNames)

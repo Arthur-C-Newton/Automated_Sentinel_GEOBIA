@@ -121,10 +121,10 @@ def segment(multiband, bands, band_names):
     """
     # re-import data and save as KEA
     raster = gdal.Open(multiband)
-    gdal.Translate("tmp\\raster.kea", raster, format="KEA")
+    gdal.Translate(tmp_path + "\\raster.kea", raster, format="KEA")
 
-    in_img = "tmp\\raster.kea"
-    clumps = "clumps_image.kea"
+    in_img = tmp_path + "\\raster.kea"
+    clumps = tmp_path + "\\clumps_image.kea"
 
     print("Running segmentation...")
 

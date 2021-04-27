@@ -50,8 +50,7 @@ By default, the column containing the class names is expected to be called 'Ecol
 with the optional argument `--class_col` when executing the script. The training data should be located at `.\input\training_data.shp`.
 
 ### Defining an extent
-Processing an entire Sentinel-2 image can take a very long time, so it is recommended to define a processing extent
-that is smaller than the full extent of the image with an extent shapefile. 
+It is recommended to define a processing extent that is smaller than the full extent of the image with an extent shapefile. 
 This shapefile should contain a single polygon that is fully within the bounds of the input imagery.
 By default, the extent shapefile should be located at `.\input\extent.shp`.
 
@@ -60,13 +59,4 @@ The script has a number of optional arguments that can be defined when executing
 
 For example: `python script.py -i different\input\folder -o different\output\folder --class_col 'class_name' --validate`
 
-Help for these arguments can be accessed with `python script.py -h` but is also provided below.
-
-### Custom folder paths
-These options are used to replace the default locations of the input, output and temporary folders used by the script.
-Each of these arguments should be followed by a custom folder path.
-
-`--input_path` or `-i` sets a custom `input` folder. This is the folder containing your image data zip file, 
-training data shapefile and extent shapefile.
-`--output_path` or `-o` sets a custom `output` folder. This is where the classified image and class csv file will be placed.
-
+Help for these arguments can be accessed with `python script.py -h`.

@@ -4,9 +4,15 @@ This script automates the geographic object-based image analysis (GEOBIA) workfl
 It is designed to work on Sentinel-2 datasets downloaded from the European Space Agency (ESA) Copernicus Hub.
 
 ## Requirements
-  * Windows (unlikely to work on Linux or macOS)
-  * Anaconda (can be downloaded from https://www.anaconda.com/products/individual#Downloads)
-  * 
+* Windows (unlikely to work on Linux or macOS)
+* Anaconda (can be downloaded from https://www.anaconda.com/products/individual#Downloads)
+* Python dependencies (included in environment.yml)
+  * rsgislib (tested with version 4.1.95)
+  * scikit-image (tested with version 0.18.1)
+  * scikit-learn (tested with version 0.24.1)
+  * rasterio (tested with version 1.1.1)
+  * geopandas (tested with version 0.9.0)
+  * All dependencies for listed packages
  ## Setup
  1. Clone or download this repository (if downloading as a zip file, remember to unzip it before use)
  2. Launch Anaconda command prompt

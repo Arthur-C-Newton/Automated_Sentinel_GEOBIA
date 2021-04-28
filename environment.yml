@@ -4,9 +4,9 @@ channels:
   - defaults
 dependencies:
   - python=3.8.8
-  - rsgislib
-  - scikit-image
-  - rasterio
-  - geopandas
-  - scikit-learn
+  - rsgislib=4.1.95
+  - scikit-image=0.18.1
+  - rasterio=1.1.1
+  - geopandas=0.9.0
+  - scikit-learn=0.24.1
 prefix: C:\Users\arthu\anaconda3\envs\auto-class

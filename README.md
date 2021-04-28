@@ -6,14 +6,17 @@ It is designed to work on Sentinel-2 datasets downloaded from the European Space
 ## Requirements
   * Windows (unlikely to work on Linux or macOS)
   * Anaconda (can be downloaded from https://www.anaconda.com/products/individual#Downloads)
-
+  * 
  ## Setup
  1. Clone or download this repository (if downloading as a zip file, remember to unzip it before use)
  2. Launch Anaconda command prompt
- 3. Create environment: `conda create -n auto-class python=3.8`
+    
+5. Navigate to the location where you cloned/extracted this repository: `cd path\to\this\repository`.
+This should be the root directory of the repository where script.py is located.
+   
+ 3. Create environment: `conda env create -f environment.yml`
  4. Activate environment: `conda activate auto-class`
- 5. Install dependencies: `conda env update -f environment.yml --prune`
-
+     
 ## Quick start
 1. Launch Anaconda command prompt
 2. Activate the environment: `conda activate auto-class`

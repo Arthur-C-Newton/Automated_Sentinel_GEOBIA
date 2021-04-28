@@ -8,4 +8,5 @@ dependencies:
   - scikit-image
   - rasterio
   - geopandas
+  - sklearn
 prefix: C:\Users\arthu\anaconda3\envs\auto-class
